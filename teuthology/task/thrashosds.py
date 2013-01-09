@@ -11,7 +11,7 @@ def task(ctx, config):
     """
     "Thrash" the OSDs by randomly marking them out/down (and then back
     in) until the task is ended. This loops, and every op_delay
-    seconds it randomly chooses to add or remove an OSD (even odds)
+    seconds it randomly /hooses to add or remove an OSD (even odds)
     unless there are fewer than min_out OSDs out of the cluster, or
     more than min_in OSDs in the cluster.
 

@@ -605,3 +605,21 @@ class CephManager:
                     'failed to reach quorum size %d before timeout expired' % size
             time.sleep(3)
         self.log("quorum is size %d" % size)
+
+
+    ## metadata servers
+
+    def kill_mds(self, mds):
+        self.ctx.daemons.get_daemon('mds', mds).stop()
+
+    def revive_mds(self, mds):
+        self.ctx.daemons.get_daemon('mds', mds).restart()
+
+    def get_mds_status(self, mds):
+        out = self.raw_cluster_cmd('mds', 'dump', '--format=json')
+        j = json.loads(' '.join(out.split(' ')[1:]))
+        # collate; for dup ids, larger gid wins.
+        for info in j['info'].itervalues():
+          if info['name'] == mds:
+              return info
+        return None

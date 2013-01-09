@@ -1,0 +1,230 @@
+import logging
+import contextlib
+import ceph_manager
+import random
+import time
+import gevent
+from teuthology import misc as teuthology
+
+log = logging.getLogger(__name__)
+
+class MDSThrasher:
+  """
+  MDSThrasher::
+
+  The MDSThrasher thrashes MDSs during execution of other tasks (workunits, etc).
+
+  The config is optional.  Many of the config parameters are a a maximum value
+  to use when selecting a random value from a range.  To always use the maximum
+  value, set no_random to true.  The config is a dict containing some or all of:
+
+  seed: [no default] seed the random number generator
+
+  randomize: [default: true] enables randomization and use the max/min values
+
+  max_thrash: [default: 1] the maximum number of MDSs that will be thrashed at
+    any given time.
+
+  max_thrash_delay: [default: 30] maximum number of seconds to delay before
+    thrashing again.
+
+  max_revive_delay: [default: 10] maximum number of seconds to delay before
+    bringing back a thrashed MDS
+
+  thrash_in_replay: [default: 0.0] likelihood that the MDS will be thrashed
+    during replay.  Value should be between 0.0 and 1.0
+
+  max_replay_thrash_delay: [default: 4] maximum number of seconds to delay while in
+    the replay state before thrashing
+
+  thrash_weights: allows specific MDSs to be thrashed more/less frequently.  This option
+    overrides anything specified by max_thrash.  This option is a dict containing
+    mds.x: weight pairs.  For example, [mds.a: 0.7, mds.b: 0.3, mds.c: 0.0].  Each weight
+    is a value from 0.0 to 1.0.  Any MDSs not specified will be automatically
+    given a weight of 0.0.  For a given MDS, by default the trasher delays for up
+    to max_thrash_delay, trashes, waits for the MDS to recover, and iterates.  If a non-zero
+    weight is specified for an MDS, for each iteration the thrasher chooses whether to thrash
+    during that iteration based on a random value [0-1] not exceeding the weight of that MDS.
+
+  Examples::
+
+
+    The following example sets the likelihood that mds.a will be thrashed
+    to 80%, mds.b to 20%, and other MDSs will not be thrashed.  It also sets the
+    likelihood that an MDS will be thrashed in replay to 40%.
+
+    tasks:
+    - ceph:
+    - mds_thrash:
+        thrash_weights:
+          - mds.a: 0.8
+          - mds.b: 0.2
+        thrash_in_replay: 0.4
+    - ceph-fuse:
+    - workunit:
+        clients:
+          all: [suites/fsx.sh]
+
+    The following example disables randomization, and uses the max delay values:
+
+    tasks:
+    - ceph:
+    - mds_thrash:
+        max_thrash_delay: 10
+        max_revive_delay: 1
+        max_replay_thrash_delay: 4
+
+  """
+  def __init__(self, ctx, manager, config, logger, to_kill, weight):
+    self.ctx = ctx
+    self.manager = manager
+    self.manager.wait_for_clean()
+
+    self.stopping = False
+    self.logger = logger
+    self.config = config
+
+    self.randomize = bool(self.config.get('randomize', True))
+    self.max_thrash_delay = float(self.config.get('thrash_delay', 30.0))
+    self.thrash_in_replay = float(self.config.get('thrash_in_replay', false))
+    assert self.thrash_in_replay < 0.0 or self.thrash_in_replay > 1.0,
+      'thrash_in_replay must be between [0.0, 1.0]'
+
+    self.max_replay_thrash_delay = float(self.config.get('max_replay_thrash_delay', 4.0))
+
+    self.thread = gevent.spawn(self.do_thrash)
+
+    self.to_kill = to_kill
+    self.weight = weight
+
+  def log(self, x):
+    self.logger.info(x)
+
+  def do_join(self):
+    self.stopping = True
+    self.thread.get()
+
+  def do_thrash(self):
+    self.log('start mds_do_thrash for mds.{_id}'.format(_id=self.to_kill))
+    while not self.stopping:
+      delay = self.max_thrash_delay
+      if self.randomize:
+          delay = random.randrange(0.0, self.max_thrash_delay)
+
+      if delay > 0.0:
+        self.log('waiting for {delay} secs before thrashing'.format(delay=delay))
+        time.sleep(delay)
+
+      skip = self.randrange(0.0, 1.0)
+      if self.weight < 1.0 and skip > self.weight:
+          self.log('skipping thrash iteration with skip ({skip}) > weight ({weight})'.format(skip=skip, weight=weight))
+          continue
+
+      self.log('kill mds.{id}'.format(id=self.to_kill))
+      self.manager.kill_mds(self.to_kill)
+
+      status = {}
+      while True:
+        status = self.manager.get_mds_status(self.to_kill)
+        if not 'laggy_since' in status:
+            break
+        self.log('waiting till mds map indicates mds.{_id} is laggy/crashed'.format(_id=self.to_kill))
+        time.sleep(2)
+      self.log('mds.{_id} reported laggy/crashed since: {since}'.format(_id=self.to_kill, since=status['laggy_since']))
+
+      delay = self.max_revive_delay
+      if self.randomize:
+          delay = random.randrange(0.0, self.max_revive_delay)
+
+      self.log('waiting for {delay} secs before reviving mds.{id}'.format(
+        delay=delay,id=self.to_kill))
+      time.sleep(delay)
+
+      self.log('reviving mds.{id}'.format(id=self.to_kill))
+      self.manager.revive_mds(self.to_kill)
+
+      status = {}
+      while True:
+        status = self.manager.get_mds_status(self.to_kill)
+        if status['state'] == 'up:active' or status['state'] == 'up:replay':
+            break
+        self.log('waiting till mds map indicates mds.{_id} is in replay or active'.format(_id=self.to_kill))
+        time.sleep(2)
+      self.log('mds.{_id} reported in {state} state'.format(_id=self.to_kill, since=status['state']))
+
+      # this might race with replay -> active transition...
+      if status['state'] == 'up:replay' and
+         random.randrange(0.0, 1.0) < self.thrash_in_replay:
+
+        delay = self.max_replay_thrash_delay
+        if self.randomize:
+          delay = random.randrange(0.0, self.max_replay_thrash_delay)
+        time.sleep(delay)
+        self.log('kill replaying mds.{id}'.format(id=self.to_kill))
+        self.manager.kill_mds(self.to_kill)
+
+        delay = self.max_revive_delay
+        if self.randomize:
+            delay = random.randrange(0.0, self.max_revive_delay)
+
+        self.log('waiting for {delay} secs before reviving mds.{id}'.format(
+            delay=delay,id=self.to_kill))
+        time.sleep(delay)
+
+        self.log('revive mds.{id}'.format(id=self.to_kill))
+        self.manager.revive_mds(self.to_kill)
+
+@contextlib.contextmanager
+def task(ctx, config):
+  """
+  Stress test the mds by thrashing while another task/workunit
+  is running.
+
+  Please refer to MDSThrasher class for further information on the
+  available options.
+  """
+  if config is None:
+    config = {}
+  assert isinstance(config, dict), \
+      'mds_thrash task only accepts a dict for configuration'
+  mdslist = list(teuthology.all_roles_of_type(ctx.cluster, 'mds'))
+  assert len(mdslist) > 1, \
+      'mds_thrash task requires at least 2 metadata servers'
+
+  # choose random seed
+  seed = None
+  if 'seed' in config:
+      seed = int(config['seed'])
+  else:
+      seed = int(time.time())
+  log.info('mds thrasher using random seed: {seed}'.format(seed=seed))
+  random.seed(seed)
+
+  max_thrashers = config.get('max_thrash', 1)
+  managers = {}
+  for mds in mdslist:
+      managers[mds] = ceph_manager.CephManager(
+        mds, ctx=ctx, logger=log.getChild('ceph_manager'),
+      )
+      weight = 1.0
+      if 'thrash_weights' in config:
+          weight = int(config['thrash_weights'].get('mds.{_id}'.format(_id=mds), '0.0'))
+
+      thrashers[mds] = MDSThrasher(
+          ctx, manager, config,
+          logger=log.getChild('mds_thrasher.mds.{_id}'.format(_id=mds)),
+          mds, weight)
+      # if thrash_weights isn't specified and we've reached max_thrash,
+      # we're done
+      if not 'thrash_weights' in config and len(managers) == max_thrashers:
+          break
+
+  try:
+    log.debug('Yielding')
+    yield
+  finally:
+    log.info('joining mds_thrashers')
+    for mds in mdslist:
+      log.info('join mds.{_id}'.format(_id=mds))
+      thrashers[mds].do_join()
+    log.info('done joining')
