@@ -28,7 +28,7 @@ def task(ctx, config):
           max_stride_size: <maximum write stride size in bytes>
           op_weights: <dictionary mapping operation type to integer weight>
           runs: <number of times to run> - the pool is remade between runs
-          ec_pool: use an ec pool
+          erasure_code_profile: use an erasure coded pool of a given profile
           pool_snaps: use pool snapshots instead of selfmanaged snapshots
 
     For example::
@@ -51,7 +51,9 @@ def task(ctx, config):
               snap_create: 3
               rollback: 2
               snap_remove: 0
-            ec_pool: true
+            erasure_code_profile:
+              name: teuthologyprofile
+            ec_pool: create ec pool, defaults to False
             pool_snaps: true
             runs: 10
         - interactive:
@@ -147,6 +149,12 @@ def task(ctx, config):
 
         clients = ['client.{id}'.format(id=id_) for id_ in teuthology.all_roles_of_type(ctx.cluster, 'client')]
         log.info('clients are %s' % clients)
+        if config.get('ec_pool', False):
+            erasure_code_profile = config.get('erasure_code_profile', {})
+            erasure_code_profile_name = erasure_code_profile.get('name', False)
+            ctx.manager.create_erasure_code_profile(erasure_code_profile_name, **erasure_code_profile)
+        else:
+            erasure_code_profile_name = False
         for i in range(int(config.get('runs', '1'))):
             log.info("starting run %s out of %s", str(i), config.get('runs', '1'))
             tests = {}
@@ -162,7 +170,7 @@ def task(ctx, config):
                 if not pool and existing_pools:
                     pool = existing_pools.pop()
                 else:
-                    pool = ctx.manager.create_pool_with_unique_name(ec_pool=config.get('ec_pool', False))
+                    pool = ctx.manager.create_pool_with_unique_name(erasure_code_profile_name=erasure_code_profile_name)
                     created_pools.append(pool)
 
                 (remote,) = ctx.cluster.only(role).remotes.iterkeys()

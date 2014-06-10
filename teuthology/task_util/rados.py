@@ -24,12 +24,11 @@ def rados(ctx, remote, cmd, wait=True, check_status=False):
     else:
         return proc
 
-def create_ec_pool(remote, name, profile_name, pgnum, m=1, k=2):
+def create_ec_pool(remote, name, profile_name, pgnum, **kwargs):
     remote.run(args=[
         'ceph', 'osd', 'erasure-code-profile', 'set',
-        profile_name, 'm=' + str(m), 'k=' + str(k),
-        'ruleset-failure-domain=osd',
-        ])
+        profile_name
+        ] + [ key + '=' + value for key, value in kwargs.iteritems() ])
     remote.run(args=[
         'ceph', 'osd', 'pool', 'create', name,
         str(pgnum), str(pgnum), 'erasure', profile_name,
