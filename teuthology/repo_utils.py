@@ -56,7 +56,7 @@ def clone_repo(repo_url, dest_path, branch):
                       GitError for other errors
     """
     validate_branch(branch)
-    log.info("Cloning %s %s from upstream", repo_url, branch)
+    log.info("Cloning %s %s from upstream to %s", repo_url, branch, dest_path)
     proc = subprocess.Popen(
         ('git', 'clone', '--branch', branch, repo_url, dest_path),
         cwd=os.path.dirname(dest_path),
@@ -182,13 +182,15 @@ def fetch_qa_suite(branch, lock=True):
     return dest_path
 
 
-def fetch_teuthology(branch, lock=True):
+def fetch_teuthology(branch, lock=True, offline=False):
     """
     Make sure we have the correct teuthology branch checked out and up-to-date
 
     :param branch: The branch we want
     :returns:      The destination path
     """
+    if offline:
+        return '.'
     src_base_path = config.src_base_path
     if not os.path.exists(src_base_path):
         os.mkdir(src_base_path)

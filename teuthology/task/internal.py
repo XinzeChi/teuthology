@@ -19,6 +19,7 @@ from teuthology.job_status import get_status, set_status
 from teuthology.config import config as teuth_config
 from teuthology.parallel import parallel
 from ..orchestra import cluster, remote, run
+from ..containers import Container
 
 log = logging.getLogger(__name__)
 
@@ -76,8 +77,8 @@ def lock_machines(ctx, config):
 
     while True:
         # get a candidate list of machines
-        machines = lock.list_locks(machine_type=machine_type, up=True,
-                                   locked=False, count=how_many + to_reserve)
+        machines = lock.list_locks(machine_type=machine_type, up=1,
+                                   locked=0, count=how_many + to_reserve)
         if machines is None:
             if ctx.block:
                 log.error('Error listing machines, trying again')
@@ -90,8 +91,8 @@ def lock_machines(ctx, config):
         if len(machines) < to_reserve + how_many and ctx.owner.startswith('scheduled'):
             if ctx.block:
                 log.info(
-                    'waiting for more machines to be free (need %s + %s, have %s)...',
-                    to_reserve,
+                    '%s waiting for more machines to be free (need %s see %s)...',
+                    ctx.owner,
                     how_many,
                     len(machines),
                 )
@@ -151,6 +152,9 @@ def lock_machines(ctx, config):
     finally:
         if ctx.config.get('unlock_on_failure', False) or \
                 get_status(ctx.summary) == 'pass':
+            for rem in ctx.cluster.remotes.keys():
+                if isinstance(rem, Container):
+                    rem.stop()
             log.info('Unlocking machines...')
             for machine in ctx.config['targets'].iterkeys():
                 lock.unlock_one(ctx, machine, ctx.owner)
@@ -212,6 +216,11 @@ def connect(ctx, config):
     for name in ctx.config['targets'].iterkeys():
         machs.append(name)
     for t, key in ctx.config['targets'].iteritems():
+        status_info = lockstatus.get_status(t)
+        if status_info.get('is_container', False):
+            container = Container(t, ctx.config.get('os_type'), ctx.config.get('os_version'))
+            remotes.append(container)
+            continue
         t = misc.canonicalize_hostname(t)
         log.debug('connecting to %s', t)
         try:
@@ -239,6 +248,8 @@ def push_inventory(ctx, config):
 
     def push():
         for rem in ctx.cluster.remotes.keys():
+            if isinstance(rem, Container):
+                continue
             info = rem.inventory_info
             lock.update_inventory(info)
     try:

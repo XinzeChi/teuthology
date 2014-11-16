@@ -25,25 +25,16 @@ PACKAGES = {}
 PACKAGES['ceph'] = {}
 PACKAGES['ceph']['deb'] = [
     'ceph',
-    'ceph-dbg',
     'ceph-mds',
-    'ceph-mds-dbg',
     'ceph-common',
-    'ceph-common-dbg',
     'ceph-fuse',
-    'ceph-fuse-dbg',
     'ceph-test',
-    'ceph-test-dbg',
     'radosgw',
-    'radosgw-dbg',
     'python-ceph',
     'libcephfs1',
-    'libcephfs1-dbg',
     'libcephfs-java',
     'librados2',
-    'librados2-dbg',
     'librbd1',
-    'librbd1-dbg',
 ]
 PACKAGES['ceph']['rpm'] = [
     'ceph-debuginfo',
@@ -60,20 +51,13 @@ PACKAGES['ceph']['rpm'] = [
 
 deb_packages = {'ceph': [
     'ceph',
-    'ceph-dbg',
     'ceph-mds',
-    'ceph-mds-dbg',
     'ceph-common',
-    'ceph-common-dbg',
     'ceph-fuse',
-    'ceph-fuse-dbg',
     'ceph-test',
-    'ceph-test-dbg',
     'radosgw',
-    'radosgw-dbg',
     'python-ceph',
     'libcephfs1',
-    'libcephfs1-dbg',
     'libcephfs-java',
 ]}
 
@@ -252,14 +236,18 @@ def _get_baseurl(ctx, remote, config):
     :returns: str -- the URL
     """
     # get distro name and arch
-    baseparms = _get_baseurlinfo_and_dist(ctx, remote, config)
-    base_url = 'http://{host}/{proj}-{pkg_type}-{dist}-{arch}-{flavor}/{uri}'.format(
-        host=ctx.teuthology_config.get('gitbuilder_host',
-                                       'gitbuilder.ceph.com'),
-        proj=config.get('project', 'ceph'),
-        pkg_type=remote.system_type,
-        **baseparms
-    )
+    if 'repository_url' in config:
+        base_url = config['repository_url']
+    else:
+        baseparms = _get_baseurlinfo_and_dist(ctx, remote, config)
+        base_url = 'http://{host}/{proj}-{pkg_type}-{dist}-{arch}-{flavor}/{uri}'.format(
+            host=ctx.teuthology_config.get('gitbuilder_host',
+                                           'gitbuilder.ceph.com'),
+            proj=config.get('project', 'ceph'),
+            pkg_type=remote.system_type,
+            **baseparms
+        )
+    log.info("_get_baseurl returns " + base_url)
     return base_url
 
 
@@ -550,12 +538,26 @@ def install_packages(ctx, pkgs, config):
         "deb": _update_deb_package_list_and_install,
         "rpm": _update_rpm_package_list_and_install,
     }
-    with parallel() as p:
+    remote = ctx.cluster.remotes.keys()[0]
+    if hasattr(remote, 'type') and remote.type == 'container':
+        system_type = teuthology.get_system_type(remote)
+        remote.commit_name = config['branch']
+        if remote.image_exists():
+            log.info("reusing existing image " + remote.image_name())
+        else:
+            f = install_pkgs[system_type]
+            f(ctx, remote, pkgs[system_type], config)
+            remote.commit(config['branch'])
         for remote in ctx.cluster.remotes.iterkeys():
-            system_type = teuthology.get_system_type(remote)
-            p.spawn(
-                install_pkgs[system_type],
-                ctx, remote, pkgs[system_type], config)
+            remote.commit_name = config['branch']
+            remote.stop()
+    else:
+        with parallel() as p:
+            for remote in ctx.cluster.remotes.iterkeys():
+                system_type = teuthology.get_system_type(remote)
+                p.spawn(
+                    install_pkgs[system_type],
+                    ctx, remote, pkgs[system_type], config)
 
 
 def _remove_deb(ctx, config, remote, debs):
@@ -778,17 +780,15 @@ def install(ctx, config):
     # the extras option right now is specific to the 'ceph' project
     extras = config.get('extras')
     if extras is not None:
-        debs = ['ceph-test', 'ceph-test-dbg', 'ceph-fuse', 'ceph-fuse-dbg',
-                'librados2', 'librados2-dbg', 'librbd1', 'librbd1-dbg', 'python-ceph']
+        debs = ['ceph-test', 'ceph-fuse',
+                'librados2', 'librbd1', 'python-ceph']
         rpm = ['ceph-fuse', 'librbd1', 'librados2', 'ceph-test', 'python-ceph']
 
     # install lib deps (so we explicitly specify version), but do not
     # uninstall them, as other packages depend on them (e.g., kvm)
     proj_install_debs = {'ceph': [
         'librados2',
-        'librados2-dbg',
         'librbd1',
-        'librbd1-dbg',
     ]}
 
     proj_install_rpm = {'ceph': [
@@ -809,6 +809,9 @@ def install(ctx, config):
     try:
         yield
     finally:
+        remote = ctx.cluster.remotes.keys()[0]
+        if hasattr(remote, 'type') and remote.type == 'container':
+            return
         remove_packages(ctx, config, remove_info)
         remove_sources(ctx, config)
         if project == 'ceph':
@@ -1226,6 +1229,8 @@ def task(ctx, config):
       install:
         ceph:
           sha1: ...
+          repository_url: http://localhost/ceph
+          dbg: true
 
     :param ctx: the argparse.Namespace object
     :param config: the config dict
@@ -1268,6 +1273,7 @@ def task(ctx, config):
 
     with contextutil.nested(
         lambda: install(ctx=ctx, config=dict(
+            repository_url=config.get('repository_url'),
             branch=config.get('branch'),
             tag=config.get('tag'),
             sha1=config.get('sha1'),
@@ -1275,6 +1281,7 @@ def task(ctx, config):
             extra_packages=config.get('extra_packages', []),
             extras=config.get('extras', None),
             wait_for_package=ctx.config.get('wait_for_package', False),
+            dbg=config.get('dbg', True),
             project=project,
         )),
         lambda: ship_utilities(ctx=ctx, config=None),

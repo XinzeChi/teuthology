@@ -338,7 +338,7 @@ def lock_many(ctx, num, machine_type, user=None, description=None,
         )
         # Only query for os_type/os_version if non-vps, since in that case we
         # just create them.
-        if machine_type != 'vps':
+        if machine_type not in ( 'vps', 'container' ):
             if os_type:
                 data['os_type'] = os_type
             if os_version:
@@ -455,6 +455,7 @@ def list_locks(keyed_by_name=False, **kwargs):
         log.exception("Could not contact lock server: %s", config.lock_server)
     else:
         success = response.ok
+    log.info("uri " + uri + " = " + str(response.json()))
     if success:
         if not keyed_by_name:
             return response.json()

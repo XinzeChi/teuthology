@@ -18,6 +18,11 @@ describe. One job is run at a time.
         help='be more verbose',
     )
     parser.add_argument(
+        '-o', '--offline',
+        action='store_true', default=None,
+        help='work offline',
+    )
+    parser.add_argument(
         '--archive-dir',
         metavar='DIR',
         help='path under which to archive results',

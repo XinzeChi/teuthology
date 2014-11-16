@@ -79,8 +79,10 @@ def main(ctx):
     beanstalk.watch_tube(connection, ctx.tube)
     result_proc = None
 
-    fetch_teuthology('master')
-    fetch_qa_suite('master')
+    fetch_teuthology('master', offline=ctx.offline)
+    if not ctx.offline:
+        fetch_qa_suite('master')
+        
 
     while True:
         # Check to see if we have a teuthology-results process hanging around
@@ -116,13 +118,14 @@ def main(ctx):
         job_config['teuthology_branch'] = teuthology_branch
 
         try:
-            teuth_path = fetch_teuthology(branch=teuthology_branch)
+            teuth_path = fetch_teuthology(branch=teuthology_branch, offline=ctx.offline)
             # For the teuthology tasks, we look for suite_branch, and if we
             # don't get that, we look for branch, and fall back to 'master'.
             # last-in-suite jobs don't have suite_branch or branch set.
             ceph_branch = job_config.get('branch', 'master')
             suite_branch = job_config.get('suite_branch', ceph_branch)
-            job_config['suite_path'] = fetch_qa_suite(suite_branch)
+            if not ctx.offline:
+                job_config['suite_path'] = fetch_qa_suite(suite_branch)
         except BranchNotFoundError:
             log.exception(
                 "Branch not found; throwing job away")
