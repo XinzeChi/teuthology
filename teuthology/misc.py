@@ -41,8 +41,7 @@ hostname_expr_templ = '(?P<user>.*@)?(?P<shortname>.*)\.{lab_domain}'
 
 
 def canonicalize_hostname(hostname, user='ubuntu'):
-    hostname_expr = hostname_expr_templ.format(
-        lab_domain=config.lab_domain.replace('.', '\.'))
+    return hostname
     match = re.match(hostname_expr, hostname)
     if match:
         match_d = match.groupdict()
@@ -479,15 +478,18 @@ def write_file(remote, path, data):
     :param path: Path on the remote being written to.
     :param data: Data to be written.
     """
-    remote.run(
-        args=[
-            'python',
-            '-c',
-            'import shutil, sys; shutil.copyfileobj(sys.stdin, file(sys.argv[1], "wb"))',
-            path,
-        ],
-        stdin=data,
-    )
+    if hasattr(remote, 'write_file'):
+        remote.write_file(path, data)
+    else:
+        remote.run(
+            args=[
+                'python',
+                '-c',
+                'import shutil, sys; shutil.copyfileobj(sys.stdin, file(sys.argv[1], "wb"))',
+                path,
+                ],
+            stdin=data,
+            )
 
 
 def sudo_write_file(remote, path, data, perms=None, owner=None):
@@ -502,28 +504,32 @@ def sudo_write_file(remote, path, data, perms=None, owner=None):
 
     Both perms and owner are passed directly to chmod.
     """
-    permargs = []
-    if perms:
-        permargs = [run.Raw('&&'), 'sudo', 'chmod', perms, path]
-    owner_args = []
-    if owner:
-        owner_args = [run.Raw('&&'), 'sudo', 'chown', owner, path]
-    remote.run(
-        args=[
-            'sudo',
-            'python',
-            '-c',
-            'import shutil, sys; shutil.copyfileobj(sys.stdin, file(sys.argv[1], "wb"))',
-            path,
-        ] + owner_args + permargs,
-        stdin=data,
-    )
+    if hasattr(remote, 'sudo_write_file'):
+        remote.sudo_write_file(path, data)
+    else:
+        permargs = []
+        if perms:
+            permargs = [run.Raw('&&'), 'sudo', 'chmod', perms, path]
+        owner_args = []
+        if owner:
+            owner_args = [run.Raw('&&'), 'sudo', 'chown', owner, path]
+        remote.run(
+            args=[
+                'sudo',
+                'python',
+                '-c',
+                'import shutil, sys; shutil.copyfileobj(sys.stdin, file(sys.argv[1], "wb"))',
+                path,
+                ] + owner_args + permargs,
+            stdin=data,
+            )
 
 
 def copy_file(from_remote, from_path, to_remote, to_path=None):
     """
     Copies a file from one remote to another.
     """
+    assert 0
     if to_path is None:
         to_path = from_path
     from_remote.run(args=[
@@ -539,20 +545,23 @@ def move_file(remote, from_path, to_path, sudo=False):
     The file needs to be stat'ed first, to make sure we
     maintain the same permissions
     """
-    args = []
-    if sudo:
-        args.append('sudo')
-    args.extend([
-        'stat',
-        '-c',
-        '\"%a\"',
-        to_path
-    ])
-    proc = remote.run(
-        args=args,
-        stdout=StringIO(),
-    )
-    perms = proc.stdout.getvalue().rstrip().strip('\"')
+    if hasattr(remote, 'move_file'):
+        remote.move_file(from_path, to_path, sudo)
+    else:
+        args = []
+        if sudo:
+            args.append('sudo')
+        args.extend([
+            'stat',
+            '-c',
+            '\"%a\"',
+            to_path
+            ])
+        proc = remote.run(
+            args=args,
+            stdout=StringIO(),
+            )
+        perms = proc.stdout.getvalue().rstrip().strip('\"')
 
     args = []
     if sudo:
@@ -587,20 +596,23 @@ def delete_file(remote, path, sudo=False, force=False):
     """
     rm a file on a remote site.
     """
-    args = []
-    if sudo:
-        args.append('sudo')
-    args.extend(['rm'])
-    if force:
-        args.extend(['-f'])
-    args.extend([
-        '--',
-        path,
-    ])
-    remote.run(
-        args=args,
-        stdout=StringIO(),
-    )
+    if hasattr(remote, 'delete_file'):
+        remote.delete_file(path, sudo, force)
+    else:
+        args = []
+        if sudo:
+            args.append('sudo')
+        args.extend(['rm'])
+        if force:
+            args.extend(['-f'])
+        args.extend([
+            '--',
+            path,
+        ])
+        remote.run(
+            args=args,
+            stdout=StringIO(),
+            )
 
 
 def remove_lines_from_file(remote, path, line_is_valid_test,
@@ -1127,6 +1139,7 @@ def stop_daemons_of_type(ctx, type_):
     exc_info = (None, None, None)
     for daemon in ctx.daemons.iter_daemons_of_role(type_):
         try:
+            log.info('Shutting down %s.%s', daemon.role, daemon.id_)
             daemon.stop()
         except (CommandFailedError,
                 CommandCrashedError,

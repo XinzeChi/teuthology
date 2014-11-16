@@ -633,6 +633,8 @@ def getRemoteConsole(name, ipmiuser, ipmipass, ipmidomain, logfile=None,
     """
     Return either VirtualConsole or PhysicalConsole depending on name.
     """
+    if misc.is_container(name):
+        raise "not implemented"
     if misc.is_vm(name):
         return VirtualConsole(name, ipmiuser, ipmipass, ipmidomain, logfile,
                               timeout)

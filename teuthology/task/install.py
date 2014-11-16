@@ -25,24 +25,16 @@ PACKAGES = {}
 PACKAGES['ceph'] = {}
 PACKAGES['ceph']['deb'] = [
     'ceph',
-    'ceph-dbg',
     'ceph-mds',
-    'ceph-mds-dbg',
     'ceph-common',
-    'ceph-common-dbg',
     'ceph-fuse',
-    'ceph-fuse-dbg',
     'ceph-test',
-    'ceph-test-dbg',
     'radosgw',
-    'radosgw-dbg',
     'python-ceph',
     'libcephfs1',
-    'libcephfs1-dbg',
     'libcephfs-java',
     'libcephfs-jni',
     'librados2',
-    'librados2-dbg',
     'librbd1',
     'librbd1-dbg',
     'rbd-fuse',
@@ -562,12 +554,26 @@ def install_packages(ctx, pkgs, config):
         "deb": _update_deb_package_list_and_install,
         "rpm": _update_rpm_package_list_and_install,
     }
-    with parallel() as p:
+    remote = ctx.cluster.remotes.keys()[0]
+    if hasattr(remote, 'type') and remote.type == 'container':
+        system_type = teuthology.get_system_type(remote)
+        remote.commit_name = config['branch']
+        if remote.image_exists():
+            log.info("reusing existing image " + remote.image_name())
+        else:
+            f = install_pkgs[system_type]
+            f(ctx, remote, pkgs[system_type], config)
+            remote.commit(config['branch'])
         for remote in ctx.cluster.remotes.iterkeys():
-            system_type = teuthology.get_system_type(remote)
-            p.spawn(
-                install_pkgs[system_type],
-                ctx, remote, pkgs[system_type], config)
+            remote.commit_name = config['branch']
+            remote.stop()
+    else:
+        with parallel() as p:
+            for remote in ctx.cluster.remotes.iterkeys():
+                system_type = teuthology.get_system_type(remote)
+                p.spawn(
+                    install_pkgs[system_type],
+                    ctx, remote, pkgs[system_type], config)
 
     for remote in ctx.cluster.remotes.iterkeys():
         # verifies that the install worked as expected
@@ -800,9 +806,7 @@ def install(ctx, config):
     # they were included in PACKAGES to ensure that nuke cleans them up.
     proj_install_debs = {'ceph': [
         'librados2',
-        'librados2-dbg',
         'librbd1',
-        'librbd1-dbg',
     ]}
 
     proj_install_rpm = {'ceph': [
@@ -826,6 +830,9 @@ def install(ctx, config):
     try:
         yield
     finally:
+        remote = ctx.cluster.remotes.keys()[0]
+        if hasattr(remote, 'type') and remote.type == 'container':
+            return
         remove_packages(ctx, config, remove_info)
         remove_sources(ctx, config)
         if project == 'ceph':
@@ -1259,6 +1266,8 @@ def task(ctx, config):
       install:
         ceph:
           sha1: ...
+          repository_url: http://localhost/ceph
+          dbg: true
 
     :param ctx: the argparse.Namespace object
     :param config: the config dict
@@ -1283,6 +1292,7 @@ def task(ctx, config):
 
     with contextutil.nested(
         lambda: install(ctx=ctx, config=dict(
+            repository_url=config.get('repository_url'),
             branch=config.get('branch'),
             tag=config.get('tag'),
             sha1=config.get('sha1'),
@@ -1290,6 +1300,7 @@ def task(ctx, config):
             extra_packages=config.get('extra_packages', []),
             extras=config.get('extras', None),
             wait_for_package=ctx.config.get('wait_for_package', False),
+            dbg=config.get('dbg', True),
             project=project,
         )),
         lambda: ship_utilities(ctx=ctx, config=None),

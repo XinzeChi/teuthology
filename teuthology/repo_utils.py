@@ -56,7 +56,7 @@ def clone_repo(repo_url, dest_path, branch):
                       GitError for other errors
     """
     validate_branch(branch)
-    log.info("Cloning %s %s from upstream", repo_url, branch)
+    log.info("Cloning %s %s from upstream to %s", repo_url, branch, dest_path)
     proc = subprocess.Popen(
         ('git', 'clone', '--branch', branch, repo_url, dest_path),
         cwd=os.path.dirname(dest_path),
