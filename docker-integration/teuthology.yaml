@@ -1,0 +1,10 @@
+lock_server: http://localhost:8080/
+queue_host: 127.0.0.1
+queue_port: 11300
+results_server: false
+canonicalize_hostname: false
+# do not fetch teuthology or ceph-qa-suite, run from sources
+src_base_path: /tmp/docker-integration
+teuthology_path: .
+install_baseurl_template: file:///packages/Ubuntu
+suite_baseurl_template: file:///packages/Ubuntu

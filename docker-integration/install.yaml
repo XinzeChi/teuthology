@@ -1,0 +1,17 @@
+os_type: ubuntu
+os_version: "14.04"
+suite_path: /home/loic/software/ceph/ceph-qa-suite
+roles:
+- - mon.a
+  - osd.0
+  - osd.1
+  - client.0
+overrides:
+  install:
+    ceph:
+      branch: master
+  ceph:
+    wait-for-scrub: false
+tasks:
+- install:
+- ceph:

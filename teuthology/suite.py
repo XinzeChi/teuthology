@@ -35,6 +35,11 @@ def main(args):
         teuthology.log.setLevel(logging.DEBUG)
     dry_run = args['--dry-run']
 
+    config_file = args['--config-file']
+    if config_file:
+        config.yaml_path = config_file
+        config.load()
+
     base_yaml_paths = args['<config_yaml>']
     suite = args['--suite'].replace('/', ':')
     ceph_branch = args['--ceph']
@@ -113,7 +118,8 @@ def main(args):
                          filter_out=filter_out,
                          subset=subset,
                          )
-    os.remove(base_yaml_path)
+    if not verbose: # to be able to copy/paste the lines output by --dry-run
+        os.remove(base_yaml_path)
 
 
 def make_run_name(suite, ceph_branch, kernel_branch, kernel_flavor,
@@ -190,21 +196,24 @@ def create_initial_config(suite, suite_branch, ceph_branch, teuthology_branch,
         kernel_dict = dict(kernel=dict())
     kernel_dict['kernel']['flavor'] = kernel_flavor
 
-    # Get the ceph hash
-    ceph_hash = get_hash('ceph', ceph_branch, kernel_flavor, machine_type,
-                         distro)
-    if not ceph_hash:
-        exc = BranchNotFoundError(ceph_branch, 'ceph.git')
-        schedule_fail(message=str(exc), name=name)
-    log.info("ceph sha1: {hash}".format(hash=ceph_hash))
+    if ceph_branch == 'ANY':
+        ceph_hash = 'HEAD'
+    else:
+        # Get the ceph hash
+        ceph_hash = get_hash('ceph', ceph_branch, kernel_flavor, machine_type,
+                             distro)
+        if not ceph_hash:
+            exc = BranchNotFoundError(ceph_branch, 'ceph.git')
+            schedule_fail(message=str(exc), name=name)
+        log.info("ceph sha1: {hash}".format(hash=ceph_hash))
 
-    # Get the ceph package version
-    ceph_version = package_version_for_hash(ceph_hash, kernel_flavor,
-                                            distro, machine_type)
-    if not ceph_version:
-        schedule_fail("Packages for ceph hash '{ver}' not found".format(
-            ver=ceph_hash), name)
-    log.info("ceph version: {ver}".format(ver=ceph_version))
+        # Get the ceph package version
+        ceph_version = package_version_for_hash(ceph_hash, kernel_flavor,
+                                                distro, machine_type)
+        if not ceph_version:
+            schedule_fail("Packages for ceph hash '{ver}' not found".format(
+                ver=ceph_hash), name)
+        log.info("ceph version: {ver}".format(ver=ceph_version))
 
     if teuthology_branch and teuthology_branch != 'master':
         if not get_branch_info('teuthology', teuthology_branch):
@@ -216,7 +225,7 @@ def create_initial_config(suite, suite_branch, ceph_branch, teuthology_branch,
             teuthology_branch = ceph_branch
         else:
             log.info("branch {0} not in teuthology.git; will use master for"
-                     " teuthology".format(ceph_branch))
+                     " teuthology".format(ceph_branchxo))
             teuthology_branch = 'master'
     log.info("teuthology branch: %s", teuthology_branch)
 
@@ -244,7 +253,8 @@ def create_initial_config(suite, suite_branch, ceph_branch, teuthology_branch,
         distro=distro,
     )
     conf_dict = substitute_placeholders(dict_templ, config_input)
-    conf_dict.update(kernel_dict)
+    if kernel_branch is not None:
+        conf_dict.update(kernel_dict)
     job_config = JobConfig.from_dict(conf_dict)
     return job_config
 
@@ -268,6 +278,8 @@ def prepare_and_schedule(job_config, suite_repo_path, base_yaml_paths, limit,
         '--num', str(num),
         '--worker', get_worker(job_config.machine_type),
     ]
+    if config.yaml_path:
+        base_args.extend(['--config-file', config.yaml_path])
     if job_config.priority:
         base_args.extend(['--priority', str(job_config.priority)])
     if verbose:
@@ -428,7 +440,7 @@ def get_gitbuilder_url(project, distro, pkg_type, arch, kernel_flavor):
     :param arch:          A string like 'x86_64'
     :param kernel_flavor: A string like 'basic'
     """
-    templ = 'http://{host}/{proj}-{pkg}-{distro}-{arch}-{flav}/'
+    templ = config.suite_baseurl_template
     return templ.format(proj=project, pkg=pkg_type, distro=distro, arch=arch,
                         flav=kernel_flavor, host=config.gitbuilder_host)
 
@@ -528,7 +540,6 @@ def schedule_suite(job_config,
 
         parsed_yaml = yaml.load(raw_yaml)
         os_type = parsed_yaml.get('os_type') or job_config.os_type
-        kernel_flavor = job_config.kernel['flavor']
         exclude_arch = parsed_yaml.get('exclude_arch')
         exclude_os_type = parsed_yaml.get('exclude_os_type')
 
@@ -560,23 +571,25 @@ def schedule_suite(job_config,
             deep_merge(full_job_config, job_config.to_dict())
             deep_merge(full_job_config, parsed_yaml)
             install_task_flavor = get_install_task_flavor(full_job_config)
-            sha1 = job_config.sha1
-            # Get package versions for this sha1, os_type and flavor. If we've
-            # already retrieved them in a previous loop, they'll be present in
-            # package_versions and gitbuilder will not be asked again for them.
-            for flavor in set([kernel_flavor, install_task_flavor]):
-                package_versions = get_package_versions(
-                    sha1,
-                    os_type,
-                    flavor,
-                    package_versions
-                )
-                if not has_packages_for_distro(sha1, os_type, flavor,
-                                               package_versions):
-                    m = "Packages for os_type '{os}', flavor {flavor} and " + \
-                        "ceph hash '{ver}' not found"
-                    log.info(m.format(os=os_type, flavor=flavor, ver=sha1))
-                    jobs_missing_packages.append(job)
+            if job_config.sha1 != 'HEAD' and job_config.kernel:
+                kernel_flavor = job_config.kernel['flavor']
+                sha1 = job_config.sha1
+                # Get package versions for this sha1, os_type and flavor. If we've
+                # already retrieved them in a previous loop, they'll be present in
+                # package_versions and gitbuilder will not be asked again for them.
+                for flavor in set([kernel_flavor, install_task_flavor]):
+                    package_versions = get_package_versions(
+                        sha1,
+                        os_type,
+                        flavor,
+                        package_versions
+                    )
+                    if not has_packages_for_distro(sha1, os_type, flavor,
+                                                   package_versions):
+                        m = "Packages for os_type '{os}', flavor {flavor} and " + \
+                            "ceph hash '{ver}' not found"
+                        log.info(m.format(os=os_type, flavor=flavor, ver=sha1))
+                        jobs_missing_packages.append(job)
 
         jobs_to_schedule.append(job)
 
@@ -968,7 +981,6 @@ dict_templ = {
     'sha1': Placeholder('ceph_hash'),
     'teuthology_branch': Placeholder('teuthology_branch'),
     'machine_type': Placeholder('machine_type'),
-    'nuke-on-error': True,
     'os_type': Placeholder('distro'),
     'overrides': {
         'admin_socket': {
@@ -1017,8 +1029,4 @@ dict_templ = {
     },
     'suite': Placeholder('suite'),
     'suite_branch': Placeholder('suite_branch'),
-    'tasks': [
-        {'chef': None},
-        {'clock.check': None}
-    ],
 }

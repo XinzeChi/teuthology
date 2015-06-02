@@ -34,12 +34,27 @@ git clean -ffqdx
 perl -p -e "s|^address.*|address = 'http://localhost'|" < config.py.in > config.py
 virtualenv ./virtualenv
 source ./virtualenv/bin/activate
-pip install -r requirements.txt 
+pip install -r requirements.txt
 pip install sqlalchemy tzlocal requests
 python setup.py develop
 pecan populate config.py
-for id in 1 2 3 ; do sqlite3 dev.db "insert into nodes (id,name,machine_type,is_vm,locked,up) values ($id, 'testmachine00$id', 'testmachine', 0, 0, 1);" ; done
+for id in 1 2 3 ; do sqlite3 dev.db "insert into nodes (id,name,machine_type,is_vm,locked,up) values ($id, 'container00$id', 'container', 0, 0, 1);" ; done
 pecan serve config.py &
 sleep 2
 
 cd ..
+
+/usr/bin/beanstalkd -l 127.0.0.1 -p 11300 &
+
+mkdir /tmp/log /tmp/a
+
+./bootstrap
+
+sleep 3
+
+virtualenv/bin/teuthology-worker --config-file docker-integration/teuthology.yaml -v -l /tmp/log --archive-dir /tmp/a --tube container < /dev/null > worker.out 2>&1 &
+
+( echo -n listen-address= ; getent hosts $(hostname) | cut -f1 -d' ' ) | sudo tee /etc/dnsmasq.d/listen
+echo resolv-file=/etc/resolv.conf | sudo tee /etc/dnsmasq.d/resolv
+
+sudo /etc/init.d/dnsmasq start

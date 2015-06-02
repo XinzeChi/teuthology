@@ -1,12 +1,22 @@
+import logging
 import pprint
 import yaml
 
+from .config import config
 import teuthology.beanstalk
 from teuthology.misc import get_user, merge_configs
 from teuthology import report
 
-
 def main(args):
+    verbose = args['--verbose']
+    if verbose:
+        teuthology.log.setLevel(logging.DEBUG)
+
+    config_file = args['--config-file']
+    if config_file:
+        config.yaml_path = config_file
+        config.load()
+
     if not args['--last-in-suite']:
         if args['--email']:
             raise ValueError(

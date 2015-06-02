@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
+import grp
 import logging
 import subprocess
 import sys
@@ -33,17 +34,20 @@ logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
 def run(os):
     name = 'teuthology-' + os
     script = """\
+set -ex
 user_id=$(id -u) perl -p -e 's/%%(\w+)%%/$ENV{$1}/g' < docker-integration/{os}.dockerfile > docker-integration/{os}.dockerfile.real
 docker build -t {name} --file docker-integration/{os}.dockerfile.real .
-docker run -v $HOME:$HOME -w $(pwd) --user $(id -u) {name} env HOME=$HOME tox -e docker-integration
+docker run --rm --privileged --name {name} --hostname {name} -v /tmp:/tmp -v /packages -v /var/run/docker.sock:/run/docker.sock -v $(which docker):/bin/docker -v $HOME:$HOME -w $(pwd) --user $(id -u) {name} env HOME=$HOME tox -e docker-integration
 """.replace('{name}', name).replace('{os}', os)
     return subprocess.check_call(script, shell=True)
 
 def main():
-    if subprocess.call(['docker', 'ps']) != 0:
-        logging.info("docker ps return on error"
-                     "docker is not available, do not run tests")
-        return 1
+    try:
+        subprocess.check_call(['docker', 'ps'])
+    except:
+        logging.info("docker ps returns on error: "
+                     "docker is not working, SKIP integration tests")
+        return 0
     return run('ubuntu-14.04')
 
 sys.exit(main())

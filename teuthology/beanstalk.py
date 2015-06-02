@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 def connect():
     host = config.queue_host
     port = config.queue_port
+    log.debug('Connect to beanstalk ' + str(host) + ' ' + str(port))
     if host is None or port is None:
         raise RuntimeError(
             'Beanstalk queue information not found in {conf_path}'.format(

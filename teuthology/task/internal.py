@@ -230,6 +230,9 @@ def check_packages(ctx, config):
     """
     log.info("Checking packages...")
     sha1 = ctx.config.get("sha1")
+    if sha1 == 'HEAD':
+        log.info("sha1 == HEAD, assume all is well")
+        return
     os_type = ctx.config.get("os_type")
     flavor = get_install_task_flavor(ctx.config)
     # We can only do this check if there are a defined sha1 and os_type
@@ -291,7 +294,8 @@ def add_remotes(ctx, config):
         machs.append(name)
     for t, key in ctx.config['targets'].iteritems():
         status_info = lockstatus.get_status(t)
-        if status_info.get('is_container', False):
+        log.debug('add_remote: ' + str(t) + ' ' + str(key) + ' ' + str(status_info))
+        if status_info['machine_type'] == 'container':
             container = Container(t, ctx.config.get('os_type'), ctx.config.get('os_version'))
             remotes.append(container)
             continue

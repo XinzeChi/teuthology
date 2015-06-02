@@ -40,17 +40,24 @@ def task(ctx, config):
         roles = teuthology.all_roles(ctx.cluster)
         config = dict((id_, a) for id_ in roles)
 
+    role2name = {}
+    for role, ls in config.iteritems():
+        (remote,) = ctx.cluster.only(role).remotes.iterkeys()
+        role2name[role] = remote.name
+
     for role, ls in config.iteritems():
         (remote,) = ctx.cluster.only(role).remotes.iterkeys()
         log.info('Running commands on role %s host %s', role, remote.name)
         for c in ls:
-            c.replace('$TESTDIR', testdir)
+            for role_s, name_s in role2name.iteritems():
+                c = c.replace('{' + role_s + '}', name_s)
+            log.info('running ' + c)
             remote.run(
                 args=[
                     'sudo',
                     'TESTDIR={tdir}'.format(tdir=testdir),
                     'bash',
                     '-c',
-                    c],
+                    c.encode('utf-8')],
                 )
 

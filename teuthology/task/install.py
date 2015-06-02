@@ -25,28 +25,20 @@ PACKAGES = {}
 PACKAGES['ceph'] = {}
 PACKAGES['ceph']['deb'] = [
     'ceph',
-    'ceph-dbg',
     'ceph-mds',
-    'ceph-mds-dbg',
     'ceph-common',
-    'ceph-common-dbg',
     'ceph-fuse',
-    'ceph-fuse-dbg',
     'ceph-test',
-    'ceph-test-dbg',
     'radosgw',
-    'radosgw-dbg',
     'python-ceph',
     'libcephfs1',
-    'libcephfs1-dbg',
     'libcephfs-java',
     'libcephfs-jni',
     'librados2',
-    'librados2-dbg',
     'librbd1',
-    'librbd1-dbg',
     'rbd-fuse',
 ]
+
 PACKAGES['ceph']['rpm'] = [
     'ceph-debuginfo',
     'ceph-radosgw',
@@ -196,7 +188,7 @@ def _get_baseurl(ctx, remote, config):
     :param config: the config dict
     :returns: str -- the URL
     """
-    template = teuth_config.baseurl_template
+    template = teuth_config.install_baseurl_template
     # get distro name and arch
     baseparms = _get_baseurlinfo_and_dist(ctx, remote, config)
     base_url = template.format(
@@ -218,8 +210,12 @@ def _block_looking_for_package_version(remote, base_url, wait=False):
     :raises: VersionNotFoundError
     """
     while True:
+        if 'file:///' in base_url:
+            args=['cat', base_url.replace('file://', '') + '/version']
+        else:
+            args=['wget', '-q', '-O-', base_url + '/version']
         r = remote.run(
-            args=['wget', '-q', '-O-', base_url + '/version'],
+            args=args,
             stdout=StringIO(),
             check_status=False,
         )
@@ -300,10 +296,12 @@ def _update_deb_package_list_and_install(ctx, remote, debs, config):
     # get package version string
     # FIXME this is a terrible hack.
     while True:
+        if 'file:///' in base_url:
+            args=['cat', base_url.replace('file://', '') + '/version']
+        else:
+            args=['wget', '-q', '-O-', base_url + '/version']
         r = remote.run(
-            args=[
-                'wget', '-q', '-O-', base_url + '/version',
-            ],
+            args=args,
             stdout=StringIO(),
             check_status=False,
         )
@@ -564,15 +562,17 @@ def install_packages(ctx, pkgs, config):
     remote = ctx.cluster.remotes.keys()[0]
     if hasattr(remote, 'type') and remote.type == 'container':
         system_type = teuthology.get_system_type(remote)
-        remote.commit_name = config['branch']
+        commit_name = config.get('sha1') or config.get('branch')
+        remote.commit_name = commit_name
+        log.info("container build/re-use image with commit_name " + commit_name)
         if remote.image_exists():
-            log.info("reusing existing image " + remote.image_name())
+            log.info("container reusing existing image " + remote.image_name())
         else:
             f = install_pkgs[system_type]
             f(ctx, remote, pkgs[system_type], config)
-            remote.commit(config['branch'])
+            remote.commit(commit_name)
         for remote in ctx.cluster.remotes.iterkeys():
-            remote.commit_name = config['branch']
+            remote.commit_name = commit_name
             remote.stop()
     else:
         with parallel() as p:
@@ -789,7 +789,7 @@ def install(ctx, config):
 
     # pull any additional packages out of config
     extra_pkgs = config.get('extra_packages')
-    log.info('extra packages: {packages}'.format(packages=extra_pkgs))
+    log.info('extra_packages: {packages}'.format(packages=extra_pkgs))
     debs += extra_pkgs
     rpm += extra_pkgs
 
@@ -800,8 +800,8 @@ def install(ctx, config):
     # install these. 'extras' might not be the best name for this.
     extras = config.get('extras')
     if extras is not None:
-        debs = ['ceph-test', 'ceph-test-dbg', 'ceph-fuse', 'ceph-fuse-dbg',
-                'librados2', 'librados2-dbg', 'librbd1', 'librbd1-dbg',
+        debs = ['ceph-test', 'ceph-fuse',
+                'librados2', 'librbd1',
                 'python-ceph']
         rpm = ['ceph-fuse', 'librbd1', 'librados2', 'ceph-test', 'python-ceph']
 
@@ -813,9 +813,7 @@ def install(ctx, config):
     # they were included in PACKAGES to ensure that nuke cleans them up.
     proj_install_debs = {'ceph': [
         'librados2',
-        'librados2-dbg',
         'librbd1',
-        'librbd1-dbg',
     ]}
 
     proj_install_rpm = {'ceph': [
@@ -1052,7 +1050,7 @@ def upgrade_common(ctx, config, deploy_style):
 
     # FIXME: extra_pkgs is not distro-agnostic
     extra_pkgs = config.get('extra_packages', [])
-    log.info('extra packages: {packages}'.format(packages=extra_pkgs))
+    log.info('extra_packages: {packages}'.format(packages=extra_pkgs))
 
     # build a normalized remote -> config dict
     remotes = {}

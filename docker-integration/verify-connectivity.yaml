@@ -1,0 +1,13 @@
+machine_type: container
+os_type: ubuntu
+os_version: "14.04"
+roles:
+- - mon.a
+- - mon.b
+tasks:
+- exec:
+    mon.a:
+      - ping -c 1 {mon.b}
+    mon.b:
+      - ping -c 1 {mon.a}
+

@@ -128,7 +128,10 @@ class TeuthologyConfig(YamlConfig):
         'archive_base': '/var/lib/teuthworker/archive',
         'automated_scheduling': False,
         'reserve_machines': 5,
-        'ceph_git_base_url': 'https://github.com/ceph/',
+        'ceph_qa_suite_git': 'https://github.com/ceph/ceph-qa-suite.git',
+        'teuthology_git': 'https://github.com/ceph/teuthology.git',
+        'ceph_git': 'https://github.com/ceph/ceph.git',
+        'swift_git': 'https://github.com/ceph/swift.git',
         'gitbuilder_host': 'gitbuilder.ceph.com',
         'lab_domain': 'front.sepia.ceph.com',
         'canonicalize_hostname': True,
@@ -138,13 +141,15 @@ class TeuthologyConfig(YamlConfig):
         'results_ui_server': 'http://pulpito.ceph.com/',
         'results_sending_email': 'teuthology',
         'results_timeout': 43200,
+        'teuthology_path': None,
         'src_base_path': os.path.expanduser('~/src'),
         'verify_host_keys': True,
         'watchdog_interval': 120,
         'kojihub_url': 'http://koji.fedoraproject.org/kojihub',
         'kojiroot_url': 'http://kojipkgs.fedoraproject.org/packages',
         'koji_task_url': 'https://kojipkgs.fedoraproject.org/work/',
-        'baseurl_template': 'http://{host}/{proj}-{pkg_type}-{dist}-{arch}-{flavor}/{uri}',
+        'install_baseurl_template': 'http://{host}/{proj}-{pkg_type}-{dist}-{arch}-{flavor}/{uri}',
+        'suite_baseurl_template': 'http://{host}/{proj}-{pkg}-{distro}-{arch}-{flav}/',
     }
 
     def __init__(self, yaml_path=None):

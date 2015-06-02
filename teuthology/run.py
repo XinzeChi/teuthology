@@ -241,9 +241,10 @@ def report_outcome(config, archive, summary, fake_ctx):
 
     if passed:
         log.info(status)
+        os._exit(0)
     else:
         log.info(str(status).upper())
-        sys.exit(1)
+        os._exit(1)
 
 
 def get_teuthology_command(args):
@@ -283,6 +284,11 @@ def main(args):
     os_version = args["--os-version"]
 
     set_up_logging(verbose, archive)
+
+    config_file = args['--config-file']
+    if config_file:
+        teuth_config.yaml_path = config_file
+        teuth_config.load()
 
     # print the command being ran
     log.debug("Teuthology command: {0}".format(get_teuthology_command(args)))

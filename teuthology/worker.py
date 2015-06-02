@@ -109,7 +109,6 @@ def main(ctx):
         archive_path_full = os.path.join(
             ctx.archive_dir, safe_archive, str(job.jid))
         job_config['archive_path'] = archive_path_full
-
         # If the teuthology branch was not specified, default to master and
         # store that value.
         teuthology_branch = job_config.get('teuthology_branch', 'master')
@@ -162,7 +161,7 @@ def main(ctx):
             log.info('Creating archive dir %s', archive_path_full)
             safepath.makedirs(ctx.archive_dir, safe_archive)
             log.info('Running job %d', job.jid)
-            run_job(job_config, teuth_bin_path)
+            run_job(ctx, job_config, teuth_bin_path)
         job.delete()
 
 
@@ -222,7 +221,7 @@ def run_with_watchdog(process, job_config):
         report.try_push_job_info(job_info, dict(status='dead'))
 
 
-def run_job(job_config, teuth_bin_path):
+def run_job(ctx, job_config, teuth_bin_path):
     suite_path = job_config['suite_path']
     arg = [
         os.path.join(teuth_bin_path, 'teuthology'),
@@ -248,6 +247,8 @@ def run_job(job_config, teuth_bin_path):
         '--archive', job_config['archive_path'],
         '--name', job_config['name'],
     ])
+    if ctx.config_file:
+        arg.extend(['--config-file', ctx.config_file])
     if job_config['description'] is not None:
         arg.extend(['--description', job_config['description']])
     arg.append('--')
@@ -266,7 +267,7 @@ def run_job(job_config, teuth_bin_path):
         log.info("Job PID: %s", str(p.pid))
 
         if teuth_config.results_server:
-            log.info("Running with watchdog")
+            log.info("Running with watchdog because " + str(teuth_config.results_server))
             try:
                 run_with_watchdog(p, job_config)
             except Exception:
