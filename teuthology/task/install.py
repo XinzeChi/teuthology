@@ -562,12 +562,26 @@ def install_packages(ctx, pkgs, config):
         "deb": _update_deb_package_list_and_install,
         "rpm": _update_rpm_package_list_and_install,
     }
-    with parallel() as p:
+    remote = ctx.cluster.remotes.keys()[0]
+    if hasattr(remote, 'type') and remote.type == 'container':
+        system_type = teuthology.get_system_type(remote)
+        remote.commit_name = config['branch']
+        if remote.image_exists():
+            log.info("reusing existing image " + remote.image_name())
+        else:
+            f = install_pkgs[system_type]
+            f(ctx, remote, pkgs[system_type], config)
+            remote.commit(config['branch'])
         for remote in ctx.cluster.remotes.iterkeys():
-            system_type = teuthology.get_system_type(remote)
-            p.spawn(
-                install_pkgs[system_type],
-                ctx, remote, pkgs[system_type], config)
+            remote.commit_name = config['branch']
+            remote.stop()
+    else:
+        with parallel() as p:
+            for remote in ctx.cluster.remotes.iterkeys():
+                system_type = teuthology.get_system_type(remote)
+                p.spawn(
+                    install_pkgs[system_type],
+                    ctx, remote, pkgs[system_type], config)
 
     for remote in ctx.cluster.remotes.iterkeys():
         # verifies that the install worked as expected
@@ -826,6 +840,9 @@ def install(ctx, config):
     try:
         yield
     finally:
+        remote = ctx.cluster.remotes.keys()[0]
+        if hasattr(remote, 'type') and remote.type == 'container':
+            return
         remove_packages(ctx, config, remove_info)
         remove_sources(ctx, config)
         if project == 'ceph':

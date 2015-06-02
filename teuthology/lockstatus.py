@@ -1,3 +1,4 @@
+import logging
 import requests
 import os
 import logging
@@ -10,6 +11,7 @@ log = logging.getLogger(__name__)
 def get_status(name):
     name = canonicalize_hostname(name, user=None)
     uri = os.path.join(config.lock_server, 'nodes', name, '')
+    log.info("lockstatus::get_status uri = " + uri)
     response = requests.get(uri)
     success = response.ok
     if success:
