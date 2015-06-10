@@ -37,7 +37,7 @@ def run(os):
 set -ex
 user_id=$(id -u) perl -p -e 's/%%(\w+)%%/$ENV{$1}/g' < docker-integration/{os}.dockerfile > docker-integration/{os}.dockerfile.real
 docker build -t {name} --file docker-integration/{os}.dockerfile.real .
-docker run --rm --privileged --name {name} --hostname {name} -v /tmp:/tmp -v /packages -v /var/run/docker.sock:/run/docker.sock -v $(which docker):/bin/docker -v $HOME:$HOME -w $(pwd) --user $(id -u) {name} env HOME=$HOME tox -e docker-integration
+docker run --rm --privileged --name {name} --hostname {name} -v /tmp:/tmp -v /home/tmp:/packages -v /var/run/docker.sock:/run/docker.sock -v $(which docker):/bin/docker -v $HOME:$HOME -w $(pwd) --user $(id -u) {name} env HOME=$HOME tox -e docker-integration
 """.replace('{name}', name).replace('{os}', os)
     return subprocess.check_call(script, shell=True)
 
