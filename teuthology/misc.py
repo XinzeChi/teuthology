@@ -10,6 +10,7 @@ import logging
 import configobj
 import getpass
 import socket
+import subprocess
 import sys
 import tarfile
 import time
@@ -1257,3 +1258,16 @@ def is_in_dict(searchkey, searchval, d):
         return True
     else:
         return searchval == val
+
+
+def sh(command):
+    log.debug(command)
+    output = ''
+    try:
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT,
+                                         shell=True)
+    except subprocess.CalledProcessError as e:
+        log.error(command + " error " + str(e.output))
+        raise e
+    log.debug(command + " output " + str(output))
+    return output.decode('utf-8')
