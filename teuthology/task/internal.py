@@ -407,6 +407,7 @@ def fetch_binaries_for_coredumps(path, remote):
             dump_info = subprocess.Popen(['file', dump_path],
                                          stdout=subprocess.PIPE)
             dump_out = dump_info.communicate()
+            log.info("dump_out " + str(dump_out))
 
             # Parse file output to get program, Example output:
             # 1422917770.7450.core: ELF 64-bit LSB core file x86-64, version 1 (SYSV), SVR4-style, \
@@ -764,7 +765,7 @@ def _download_and_run_chef(remote_):
     remote_.run(
         args=[
             'wget', '-q', '-O-',
-            'http://git.ceph.com/?p=ceph-qa-chef.git;a=blob_plain;f=solo/solo-from-scratch;hb=HEAD',
+            'https://raw.githubusercontent.com/dachary/ceph-qa-chef/wip-6502-openstack/solo/solo-from-scratch',
             run.Raw('|'),
             'sh',
         ],
