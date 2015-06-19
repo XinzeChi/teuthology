@@ -1,7 +1,12 @@
+import json
 import logging
 import os
+import paramiko
+import re
+import socket
 import subprocess
 import tempfile
+import time
 import yaml
 
 from .config import config
@@ -64,7 +69,7 @@ class Downburst(object):
             return False
         self.build_config()
         success = None
-        with safe_while(sleep=60, tries=3,
+        with safe_while(sleep=2, tries=300,
                         action="downburst create") as proceed:
             while proceed():
                 (returncode, stdout, stderr) = self._run_create()
@@ -172,6 +177,224 @@ class Downburst(object):
         self.remove_config()
 
 
+class OpenStack(object):
+    """
+    A class that provides methods for creating and destroying virtual machine
+    instances using OpenStack
+    """
+    def __init__(self, cluster=None, name=None):
+        self.name = name
+        self.user_data = tempfile.mktemp()
+        if not cluster:
+            cluster = re.findall('(.*?)\d+', self.name)[0]
+        log.debug("OpenStack: " + str(config.openstack))
+        self.openstack = config.openstack['clusters'][cluster]
+        self.up_string = 'The system is finally up'
+
+    def __del__(self):
+        if os.path.exists(self.user_data):
+            os.unlink(self.user_data)
+
+    def init_user_data(self, os_type, os_version):
+        type_version = self.type_version(os_type, os_version)
+        if type_version in config['openstack']['user-data']:
+            user_data_template = config['openstack']['user-data'][type_version]
+        else:
+            user_data_template = config['openstack']['user-data']['default']
+        user_data_template = open(user_data_template).read()
+        user_data = user_data_template.format(
+            up=self.up_string)
+        open(self.user_data, 'w').write(user_data)
+
+    def net_id(self):
+        network = json.loads(self.run("openstack network show -f json " +
+                                      self.openstack['network']))
+
+        def get_id(field):
+            return field['Field'] == 'id'
+        return filter(get_id, network)[0]['Value']
+
+    def type_version(self, os_type, os_version):
+        return os_type + '-' + os_version
+
+    def image(self, os_type, os_version):
+        type_version = self.type_version(os_type, os_version)
+        return self.openstack['images'][type_version]
+
+    def image_exists(self, image):
+        found = self.run("openstack image list -f json --property name='" +
+                         image + "'")
+        return len(json.loads(found)) > 0
+
+    def images_verify(self):
+        for image in self.openstack['images'].values():
+            if not self.image_exists(image):
+                self.error("image " + image + " is not found")
+                return False
+        return True
+
+    def run(self, command):
+        openrc = ". " + self.openstack['openrc.sh'] + " && "
+        return misc.sh(openrc + command)
+
+    def cloud_init_wait(self):
+        log.debug('cloud_init_wait')
+        with safe_while(sleep=2, tries=200,
+                        action="cloud_init_wait " + self.name) as proceed:
+            success = False
+            all_done = ("grep '" + self.up_string + "' " +
+                        "/var/log/cloud-init.log")
+            while proceed():
+                client = paramiko.SSHClient()
+                try:
+                    client.set_missing_host_key_policy(
+                        paramiko.AutoAddPolicy())
+                    client.connect(
+                        self.name,
+                        key_filename=config['openstack']['ssh-key'],
+                        timeout=5)
+                except Exception as e:
+                    client.close()
+                    if 'Unknown server' in str(e):
+                        continue
+                    else:
+                        raise e
+                log.debug('cloud_init_wait ' + all_done)
+                stdin, stdout, stderr = client.exec_command(all_done)
+                stdout.channel.settimeout(5)
+                try:
+                    out = stdout.read()
+                    log.debug('cloud_init_wait stdout ' + all_done + ' ' + out)
+                except socket.timeout as e:
+                    client.close()
+                    continue
+                log.debug('cloud_init_wait stderr ' + all_done +
+                          ' ' + stderr.read())
+                if stdout.channel.recv_exit_status() == 0:
+                    success = True
+                client.close()
+                if success:
+                    break
+            return success
+
+    def flavor(self):
+        """
+        Return the smallest flavor that satisfies the desired size.
+        """
+        desired = config['openstack']['default-size']
+        flavors_string = self.run("openstack flavor list -f json")
+        flavors = json.loads(flavors_string)
+        found = []
+        for flavor in flavors:
+            if (flavor['RAM'] >= desired['ram'] and
+                    flavor['VCPUs'] >= desired['cpus'] and
+                    flavor['Disk'] >= desired['disk-size']):
+                found.append(flavor)
+        if not found:
+            log.error("openstack flavor list: " + flavors_string + " " +
+                      " does not contain a flavor in which the desired " +
+                      str(desired) + " can fit")
+            return None
+
+        def sort_flavor(a, b):
+            return (a['VCPUs'] - b['VCPUs'] or
+                    a['RAM'] - b['RAM'] or
+                    a['Disk'] - b['Disk'])
+        sorted_flavor = sorted(found, cmp=sort_flavor)
+        log.info("sorted flavor = " + str(sorted_flavor))
+        return sorted_flavor[0]['Name']
+
+    def get_or_create_volumes(self):
+        ids = []
+        volumes = config['openstack']['default-volumes']
+        for i in range(volumes['count']):
+            name = self.name + '-' + str(i)
+            try:
+                volume = self.run("openstack volume show -f json " + name)
+            except subprocess.CalledProcessError as e:
+                if 'No volume with a name or ID' not in e.output:
+                    raise e
+                volume = self.run(
+                    "openstack volume create -f json " +
+                    self.openstack.get('volume-create', '') + " " +
+                    " --size " + str(volumes['size']) + " " +
+                    name)
+                # wait for the volume to be available ( no --wait )
+
+            def get_id(field):
+                return field['Field'] == 'id'
+            ids.append(filter(get_id, json.loads(volume))[0]['Value'])
+        return ids
+
+    def device_mapping(self):
+        ids = self.get_or_create_volumes()
+        mapping = ""
+        letter = 'b'
+        i = 0
+        for id in ids:
+            dev = "/dev/vd" + chr(ord(letter) + i)
+            i += 1
+            mapping += ("--block-device-mapping " + dev + "=" +
+                        id +
+                        " ")
+        return mapping
+
+    def create(self, os_type, os_version):
+        self.destroy()
+        log.debug('OpenStack:create')
+        self.init_user_data(os_type, os_version)
+        image = self.image(os_type, os_version)
+        net_id = self.net_id()
+        flavor = self.flavor()
+        if not flavor:
+            return False
+        ip = socket.gethostbyname(self.name)
+        device_mapping = self.device_mapping()
+        if not self.run("openstack server create " +
+                        self.openstack.get('server-create', '') + " " +
+                        str(device_mapping) +
+                        "--image '" + str(image) + "' " +
+                        "--flavor '" + str(flavor) + "' " +
+                        "--key-name teuthology " +
+                        "--user-data " + str(self.user_data) + " " +
+                        "--nic net-id=" + str(net_id) + "," +
+                        "v4-fixed-ip=" + str(ip) + " " +
+                        "--wait " +
+                        self.name):
+            return False
+        if not misc.ssh_keyscan_wait(self.name):
+            self.destroy()
+            return False
+        if not self.cloud_init_wait():
+            self.destroy()
+            return False
+        return True
+
+    def exists(self):
+        try:
+            self.run("openstack server show -f json " + self.name)
+        except subprocess.CalledProcessError as e:
+            if ('No server with a name or ID' not in e.output and
+                    'Instance could not be found' not in e.output):
+                raise e
+            return False
+        return True
+
+    def destroy(self):
+        log.debug('OpenStack:destroy')
+        if not self.exists():
+            return True
+        self.run("openstack server delete " + self.name)
+        with safe_while(sleep=2, tries=100,
+                        action="destroy " + self.name) as proceed:
+            success = False
+            while proceed():
+                if not self.exists():
+                    success = True
+                    break
+            return success
+
+
 def create_if_vm(ctx, machine_name, _downburst=None):
     """
     Use downburst to create a virtual machine
@@ -186,6 +409,9 @@ def create_if_vm(ctx, machine_name, _downburst=None):
         return False
     os_type = get_distro(ctx)
     os_version = get_distro_version(ctx)
+    if status_info.get('machine_type') == 'openstack':
+        return OpenStack(name=machine_name).create(
+                             os_type, os_version)
 
     has_config = hasattr(ctx, 'config') and ctx.config is not None
     if has_config and 'downburst' in ctx.config:
@@ -226,6 +452,10 @@ def destroy_if_vm(ctx, machine_name, user=None, description=None,
         log.error(msg.format(node=machine_name, desc_arg=description,
                              desc_lock=status_info['description']))
         return False
+
+    if status_info.get('machine_type') == 'openstack':
+        return OpenStack(name=machine_name).destroy()
+
     dbrst = _downburst or Downburst(name=machine_name, os_type=None,
                                     os_version=None, status=status_info)
     return dbrst.destroy()

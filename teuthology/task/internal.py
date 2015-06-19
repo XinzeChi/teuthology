@@ -101,7 +101,8 @@ def lock_machines(ctx, config):
         if len(machines) < to_reserve + how_many and ctx.owner.startswith('scheduled'):
             if ctx.block:
                 log.info(
-                    'waiting for more machines to be free (need %s + %s, have %s)...',
+                    'waiting for more %s machines to be free (need %s + %s, have %s)...',
+                    machine_type,
                     to_reserve,
                     how_many,
                     len(machines),
@@ -712,8 +713,9 @@ def vm_setup(ctx, config):
     """
     all_tasks = [x.keys()[0] for x in ctx.config['tasks']]
     need_chef = False
-    if 'chef' in all_tasks or 'kernel' in all_tasks:
-        need_chef = True
+    log.info("vm_setup ctx = " + str(ctx) + " config = " + str(config))
+#    if 'chef' in all_tasks or 'kernel' in all_tasks:
+#        need_chef = True
     with parallel() as p:
         editinfo = os.path.join(os.path.dirname(__file__),'edit_sudoers.sh')
         for rem in ctx.cluster.remotes.iterkeys():
@@ -723,6 +725,7 @@ def vm_setup(ctx, config):
                         stdout=StringIO(),
                         check_status=False,)
                 if r.returncode != 0:
+                    log.info("edit /etc/sudoers on " + str(rem))
                     p1 = subprocess.Popen(['cat', editinfo], stdout=subprocess.PIPE)
                     p2 = subprocess.Popen(
                         [

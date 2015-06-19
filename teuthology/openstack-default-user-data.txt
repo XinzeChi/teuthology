@@ -1,0 +1,15 @@
+#cloud-config
+bootcmd:
+ - echo "MaxSessions 1000" >> /etc/ssh/sshd_config
+system_info:
+  default_user:
+    name: ubuntu
+packages:
+ - python
+ - python-nose
+ - wget
+ - git
+ - gcc
+ - make
+ - automake
+final_message: "{up}, after $UPTIME seconds"

@@ -11,7 +11,10 @@ setup(
     packages=find_packages(),
     package_data={
      'teuthology.task': ['valgrind.supp', 'adjust-ulimits', 'edit_sudoers.sh', 'daemon-helper'],
-     'teuthology': ['ceph.conf.template'],
+     'teuthology': [
+         'ceph.conf.template',
+         'openstack-ubuntu-user-data.txt',
+     ],
     },
     author='Inktank Storage, Inc.',
     author_email='ceph-qa@ceph.com',
@@ -40,17 +43,23 @@ setup(
                       'boto >= 2.0b4',
                       'bunch >= 1.0.0',
                       'configobj',
-                      'six >= 1.5.0',  # Require a new-ish six - only for configobj
+                      'six >= 1.9.0',  # Require a new-ish six - only for configobj
                       'httplib2',
                       'paramiko < 1.8',
+                      'pyOpenSSL <= 0.13',
                       'pexpect',
-                      'requests >= 2.3.0',
+                      'requests >= 2.7.0',
                       'raven',
                       'web.py',
                       'docopt',
                       'psutil >= 2.1.0',
                       'configparser',
+                      'testtools',
+                      # the default pbr will conflict with paramiko requirements
+                      'pbr>=0.6,!=0.7,<1.0',
+                      'python-openstackclient',
                       'pytest',
+                      'mock',
                       'ansible==1.9.1',
                       'pyopenssl>=0.13',
                       'ndg-httpsclient',

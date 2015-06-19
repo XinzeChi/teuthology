@@ -375,7 +375,7 @@ def lock_many(ctx, num, machine_type, user=None, description=None,
     # all in one shot. If we are passed 'plana,mira,burnupi,vps', do one query
     # for 'plana,mira,burnupi' and one for 'vps'
     machine_types_list = misc.get_multi_machine_types(machine_type)
-    if machine_types_list == ['vps']:
+    if machine_types_list == ['vps'] or machine_types_list == ['openstack']:
         machine_types = machine_types_list
     elif 'vps' in machine_types_list:
         machine_types_non_vps = list(machine_types_list)
@@ -396,7 +396,7 @@ def lock_many(ctx, num, machine_type, user=None, description=None,
         )
         # Only query for os_type/os_version if non-vps, since in that case we
         # just create them.
-        if machine_type != 'vps':
+        if machine_type not in ('vps', 'openstack'):
             if os_type:
                 data['os_type'] = os_type
             if os_version:
@@ -414,7 +414,7 @@ def lock_many(ctx, num, machine_type, user=None, description=None,
                         machine['ssh_pub_key'] for machine in response.json()}
             log.debug('locked {machines}'.format(
                 machines=', '.join(machines.keys())))
-            if machine_type == 'vps':
+            if machine_type in ('vps', 'openstack'):
                 ok_machs = {}
                 for machine in machines:
                     if provision.create_if_vm(ctx, machine):
@@ -500,10 +500,16 @@ def unlock_one(ctx, name, user, description=None):
 
 def list_locks(keyed_by_name=False, **kwargs):
     uri = os.path.join(config.lock_server, 'nodes', '')
+    for key, value in kwargs.iteritems():
+        if kwargs[key] is False:
+            kwargs[key] = '0'
+        if kwargs[key] is True:
+            kwargs[key] = '1'
     if kwargs:
         if 'machine_type' in kwargs:
             kwargs['machine_type'] = kwargs['machine_type'].replace(',','|')
         uri += '?' + urllib.urlencode(kwargs)
+    log.debug("list_locks: " + uri)
     try:
         response = requests.get(uri)
     except requests.ConnectionError:
